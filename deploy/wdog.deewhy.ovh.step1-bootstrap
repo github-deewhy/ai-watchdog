@@ -1,0 +1,26 @@
+# /etc/nginx/sites-available/wdog.deewhy.ovh
+#
+# STEP 1 — bootstrap config, used ONLY to get the first Let's Encrypt
+# certificate issued (no ssl_certificate lines exist on disk yet, so
+# nginx can't load an HTTPS server block until certbot creates them).
+#
+# Once certbot has run (see the accompanying instructions), replace this
+# file with wdog.deewhy.ovh.step2-final and reload nginx.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name wdog.deewhy.ovh;
+
+    root /var/www/wdog.deewhy.ovh;
+    index index.html;
+
+    # Required for the ACME HTTP-01 challenge certbot performs below.
+    location /.well-known/acme-challenge/ {
+        root /var/www/wdog.deewhy.ovh;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}

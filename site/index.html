@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Watchdog — the missing jail for fail2ban</title>
+<meta name="description" content="An AI-driven fail2ban jail that reads Nginx logs like an analyst, not a regex. Free, open source, self-hosted.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* page theme — light */
+    --bg-0:#ffffff;
+    --bg-1:#f6f5f2;
+    --bg-2:#eeece6;
+    --line:#e3e1da;
+    --line-strong:#c9c6bc;
+    --text-0:#1b1c19;
+    --text-1:#585a51;
+    --text-2:#8b8d82;
+    --amber:#b5720c;
+    --amber-soft:#fdf1de;
+    --green:#2f7a4c;
+    --red:#a8382c;
+    --mono:'IBM Plex Mono', ui-monospace, monospace;
+    --sans:'IBM Plex Sans', -apple-system, sans-serif;
+
+    /* terminal window — stays dark regardless of page theme */
+    --term-bg:#14171a;
+    --term-bg2:#1b1f23;
+    --term-line:#2a2f34;
+    --term-text:#c7ccd1;
+    --term-text-dim:#767c82;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--bg-0);
+    color:var(--text-0);
+    font-family:var(--sans);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit;}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 24px;}
+  ::selection{background:var(--amber-soft);color:var(--text-0);}
+
+  /* ---------- nav ---------- */
+  header{
+    position:sticky;top:0;z-index:20;
+    background:rgba(255,255,255,0.86);
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);
+  }
+  nav{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;max-width:1040px;margin:0 auto;}
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-weight:600;font-size:15px;letter-spacing:0.02em;}
+  .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(47,122,76,0.14);}
+  .navlinks{display:flex;gap:28px;font-size:14px;color:var(--text-1);}
+  .navlinks a{text-decoration:none;transition:color .15s;}
+  .navlinks a:hover{color:var(--text-0);}
+  .navcta{
+    font-size:13px;font-family:var(--mono);
+    border:1px solid var(--line-strong);
+    padding:7px 14px;border-radius:6px;
+    text-decoration:none;color:var(--text-0);
+    white-space:nowrap;
+  }
+  .navcta:hover{border-color:var(--amber);color:var(--amber);}
+  @media (max-width:720px){ .navlinks{display:none;} }
+
+  /* ---------- hero ---------- */
+  .hero{padding:88px 0 64px;position:relative;overflow:hidden;}
+  .hero::before{
+    content:"";position:absolute;inset:0;
+    background:radial-gradient(600px 300px at 15% 0%, rgba(181,114,12,0.07), transparent 60%);
+    pointer-events:none;
+  }
+  .eyebrow{
+    font-family:var(--mono);font-size:12.5px;color:var(--amber);
+    letter-spacing:0.08em;text-transform:uppercase;margin:0 0 18px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .eyebrow::before{content:"";width:16px;height:1px;background:var(--amber);}
+  h1{
+    font-size:clamp(32px,5vw,54px);
+    line-height:1.08;
+    margin:0 0 22px;
+    max-width:820px;
+    font-weight:600;
+    letter-spacing:-0.01em;
+    color:var(--text-0);
+  }
+  h1 em{font-style:normal;color:var(--text-1);}
+  .lede{
+    font-size:18px;color:var(--text-1);max-width:600px;margin:0 0 34px;
+  }
+  .lede code{font-family:var(--mono);color:var(--text-0);background:var(--bg-2);padding:1px 6px;border-radius:4px;font-size:15px;}
+  .cta-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:64px;}
+  .btn{
+    font-family:var(--mono);font-size:14px;font-weight:500;
+    padding:12px 22px;border-radius:7px;text-decoration:none;
+    display:inline-flex;align-items:center;gap:9px;
+    transition:transform .12s, border-color .12s, background .12s;
+  }
+  .btn-primary{background:var(--amber);color:#fffaf2;}
+  .btn-primary:hover{transform:translateY(-1px);}
+  .btn-ghost{border:1px solid var(--line-strong);color:var(--text-0);}
+  .btn-ghost:hover{border-color:var(--text-1);}
+
+  /* ---------- terminal (always dark — deliberate contrast element) ---------- */
+  .terminal{
+    background:var(--term-bg);border:1px solid var(--term-line);border-radius:10px;
+    overflow:hidden;box-shadow:0 24px 60px -28px rgba(27,28,25,0.28);
+  }
+  .term-bar{
+    display:flex;align-items:center;gap:8px;padding:11px 16px;
+    border-bottom:1px solid var(--term-line);background:var(--term-bg2);
+  }
+  .term-bar .tdot{width:10px;height:10px;border-radius:50%;}
+  .term-title{margin-left:8px;font-family:var(--mono);font-size:12px;color:var(--term-text-dim);}
+  .term-body{
+    font-family:var(--mono);font-size:13px;line-height:1.9;
+    padding:20px 22px;min-height:250px;color:var(--term-text);
+  }
+  .term-body .ln{opacity:0;animation:appear .25s forwards;white-space:pre-wrap;word-break:break-word;}
+  @keyframes appear{to{opacity:1;}}
+  .tag-ban{color:#e0796a;font-weight:600;}
+  .tag-ignore{color:var(--term-text-dim);}
+  .tag-unban{color:#6fc38f;font-weight:600;}
+  .cursor{display:inline-block;width:7px;height:14px;background:#e0a53e;vertical-align:-2px;animation:blink 1s step-end infinite;}
+  @keyframes blink{50%{opacity:0;}}
+
+  /* ---------- sections generic ---------- */
+  section{padding:72px 0;border-top:1px solid var(--line);}
+  .kicker{font-family:var(--mono);font-size:12px;color:var(--amber);text-transform:uppercase;letter-spacing:0.08em;margin:0 0 12px;}
+  h2{font-size:clamp(24px,3.4vw,34px);font-weight:600;margin:0 0 16px;letter-spacing:-0.01em;color:var(--text-0);}
+  .section-lede{color:var(--text-1);max-width:640px;font-size:16px;margin-bottom:44px;}
+
+  /* ---------- why / problem ---------- */
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  .compare>div{background:var(--bg-1);padding:28px 26px;}
+  .compare h3{font-family:var(--mono);font-size:13px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-2);margin:0 0 16px;}
+  .compare ul{margin:0;padding:0;list-style:none;}
+  .compare li{font-size:14.5px;color:var(--text-1);padding:9px 0;border-top:1px solid var(--line);display:flex;gap:10px;}
+  .compare li:first-child{border-top:none;}
+  .compare li::before{content:"—";color:var(--text-2);flex-shrink:0;}
+  .compare.ai{background:var(--amber-soft);}
+  .compare.ai li::before{content:"✓";color:var(--green);}
+  @media (max-width:680px){.compare{grid-template-columns:1fr;}}
+
+  /* ---------- architecture ---------- */
+  .flow{display:flex;flex-direction:column;gap:0;font-family:var(--mono);font-size:13.5px;max-width:560px;}
+  .flow .step{
+    display:flex;align-items:center;gap:16px;padding:16px 18px;
+    background:var(--bg-1);border:1px solid var(--line);border-radius:8px;
+  }
+  .flow .step .n{color:var(--amber);font-weight:600;}
+  .flow .step .d{color:var(--text-2);font-size:12.5px;margin-top:2px;}
+  .flow .arrow{align-self:center;color:var(--line-strong);font-size:16px;padding:6px 0;}
+
+  /* ---------- features grid ---------- */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  .grid>div{background:var(--bg-1);padding:26px 24px;}
+  .grid h4{font-size:15.5px;font-weight:600;margin:0 0 8px;color:var(--text-0);}
+  .grid p{font-size:14px;color:var(--text-1);margin:0;}
+  .grid .ico{font-family:var(--mono);color:var(--amber);font-size:13px;margin-bottom:14px;}
+  @media (max-width:820px){.grid{grid-template-columns:1fr 1fr;}}
+  @media (max-width:560px){.grid{grid-template-columns:1fr;}}
+
+  /* ---------- install ---------- */
+  .install-box{
+    background:var(--term-bg);border:1px solid var(--term-line);border-radius:10px;
+    overflow:hidden;
+  }
+  .install-box .term-body{min-height:0;padding:22px 24px;}
+  .install-box .term-body div{color:var(--term-text);}
+  .install-box .term-body .c{color:var(--term-text-dim);}
+  .install-box .term-body .p{color:#e0a53e;}
+  .reqs{display:flex;flex-wrap:wrap;gap:10px;margin:24px 0 0;}
+  .reqs span{
+    font-family:var(--mono);font-size:12.5px;color:var(--text-1);
+    border:1px solid var(--line);padding:6px 12px;border-radius:20px;
+    background:var(--bg-1);
+  }
+
+  /* ---------- upsell ---------- */
+  .upsell{
+    border-top:1px solid var(--line);
+    background:linear-gradient(180deg, var(--amber-soft), transparent 45%);
+  }
+  .upsell-card{
+    border:1px solid #e6c98a;
+    background:var(--bg-0);
+    border-radius:14px;padding:40px;
+    display:grid;grid-template-columns:1.2fr 1fr;gap:36px;align-items:center;
+    box-shadow:0 20px 50px -30px rgba(181,114,12,0.25);
+  }
+  .upsell-card h3{font-size:24px;margin:0 0 12px;font-weight:600;color:var(--text-0);}
+  .upsell-card p{color:var(--text-1);font-size:15px;margin:0 0 22px;max-width:460px;}
+  .upsell-feats{list-style:none;margin:0;padding:0;font-size:14px;color:var(--text-1);}
+  .upsell-feats li{padding:7px 0;display:flex;gap:10px;}
+  .upsell-feats li::before{content:"›";color:var(--amber);font-weight:600;}
+  .upsell-panel{
+    background:var(--bg-1);border:1px solid var(--line);border-radius:10px;padding:22px;
+    font-family:var(--mono);font-size:12.5px;color:var(--text-2);
+  }
+  .upsell-panel .row{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);}
+  .upsell-panel .row:first-child{border-top:none;}
+  .upsell-panel .val{color:var(--text-0);}
+  @media (max-width:760px){.upsell-card{grid-template-columns:1fr;padding:28px;}}
+
+  /* ---------- faq ---------- */
+  .faq-item{border-top:1px solid var(--line);padding:22px 0;}
+  .faq-item:last-child{border-bottom:1px solid var(--line);}
+  .faq-item h4{margin:0 0 8px;font-size:15.5px;font-weight:600;color:var(--text-0);}
+  .faq-item p{margin:0;color:var(--text-1);font-size:14.5px;max-width:640px;}
+
+  /* ---------- footer ---------- */
+  footer{padding:44px 0 60px;}
+  .foot-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;}
+  .foot-links{display:flex;gap:22px;font-size:13.5px;color:var(--text-1);flex-wrap:wrap;}
+  .foot-links a{text-decoration:none;}
+  .foot-links a:hover{color:var(--text-0);}
+  .foot-note{font-size:12.5px;color:var(--text-2);margin-top:26px;font-family:var(--mono);}
+</style>
+</head>
+<body>
+
+<header>
+  <nav>
+    <div class="brand"><span class="dot"></span>ai-watchdog</div>
+    <div class="navlinks">
+      <a href="#how">How it works</a>
+      <a href="#install">Install</a>
+      <a href="#upgrade">Need a dashboard?</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <a class="navcta" href="#install">Get the script ↗</a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero wrap" style="border-top:none;">
+    <p class="eyebrow">Free · open source · self-hosted</p>
+    <h1>fail2ban is great at counting.<br><em>It can't read.</em></h1>
+    <p class="lede">ai-watchdog is a small script that hands your Nginx logs to a language model every few minutes, and lets <code>fail2ban-client</code> act on what it finds — catching crafted exploit attempts and stealthy scanners that never trip a regex.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#install">Install in 10 minutes</a>
+      <a class="btn btn-ghost" href="#how">See how it decides →</a>
+    </div>
+
+    <div class="terminal">
+      <div class="term-bar">
+        <div class="tdot" style="background:#3a3f44;"></div>
+        <div class="tdot" style="background:#3a3f44;"></div>
+        <div class="tdot" style="background:#3a3f44;"></div>
+        <span class="term-title">tail -f /var/log/ai-watchdog.log</span>
+      </div>
+      <div class="term-body" id="termBody"></div>
+    </div>
+  </section>
+
+  <section id="how" class="wrap">
+    <p class="kicker">The problem</p>
+    <h2>Regex rules only catch what you already thought of</h2>
+    <p class="section-lede">Static jails match known patterns in known places. A one-off, hand-crafted probe against an endpoint nobody's fingerprinted yet just looks like a 404 — until a model reads the whole request in context.</p>
+
+    <div class="compare">
+      <div>
+        <h3>Regex-only jails</h3>
+        <ul>
+          <li>Match fixed strings and known bad user agents</li>
+          <li>Blind to novel or obfuscated payloads</li>
+          <li>Ban on rate, not on intent</li>
+          <li>No sense of "this looks like reconnaissance"</li>
+        </ul>
+      </div>
+      <div class="compare ai">
+        <h3>ai-watchdog + fail2ban</h3>
+        <ul>
+          <li>Reads flagged requests in context, not just as strings</li>
+          <li>Classifies BAN / IGNORE / UNBAN with a reason in the log</li>
+          <li>Sits on top of your existing jails — nothing to migrate</li>
+          <li>Enforcement still happens in nftables, at the kernel</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" style="padding-top:0;border-top:none;">
+    <p class="kicker">Architecture</p>
+    <h2>One more jail, driven by a model instead of a pattern file</h2>
+    <p class="section-lede">The <code style="font-family:var(--mono);background:var(--bg-2);padding:1px 6px;border-radius:4px;">ai-watchdog</code> fail2ban jail holds no filter and no regex — it exists only to hold the ban action. Everything upstream of it is where the actual thinking happens.</p>
+
+    <div class="flow">
+      <div class="step"><span class="n">01</span><div><div>Read new Nginx log lines <span class="d">(inode + offset tracked — never re-reads)</span></div></div></div>
+      <div class="arrow">↓</div>
+      <div class="step"><span class="n">02</span><div><div>Pre-filter for exploit signatures <span class="d">LFI / RCE / SQLi / SSRF / scanner UAs</span></div></div></div>
+      <div class="arrow">↓</div>
+      <div class="step"><span class="n">03</span><div><div>Send candidate IPs to a hosted LLM <span class="d">rate-limited, temp=0, one-word answer</span></div></div></div>
+      <div class="arrow">↓</div>
+      <div class="step"><span class="n">04</span><div><div>fail2ban-client bans / unbans <span class="d">this script never touches the firewall itself</span></div></div></div>
+      <div class="arrow">↓</div>
+      <div class="step"><span class="n">05</span><div><div>nftables drops the traffic <span class="d">kernel-level, same as any other jail</span></div></div></div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <p class="kicker">What's inside</p>
+    <h2>Small on purpose</h2>
+    <p class="section-lede">One script, one timer, one jail. No dashboard, no database, no service to keep patched beyond what you already run.</p>
+    <div class="grid">
+      <div><div class="ico">[rate]</div><h4>Sliding-window rate limiter</h4><p>Every retry counts against the budget, so a backoff loop can't quietly blow through your provider's per-minute cap.</p></div>
+      <div><div class="ico">[timer]</div><h4>systemd timer, not cron</h4><p>A oneshot service on a 5-minute timer, with the log tailer tracking file offsets so restarts never reprocess old lines.</p></div>
+      <div><div class="ico">[hardened]</div><h4>Locked-down service unit</h4><p><code style="font-family:var(--mono);">NoNewPrivileges</code>, <code style="font-family:var(--mono);">ProtectSystem=strict</code> — write access limited to its own state and log directories.</p></div>
+      <div><div class="ico">[report]</div><h4>One status command</h4><p><code style="font-family:var(--mono);">fail2ban-report.sh</code> prints every active jail — not just this one — with bans, failure counts, and totals.</p></div>
+      <div><div class="ico">[portable]</div><h4>Any OpenAI-compatible API</h4><p>Ships pointed at a free-tier hosted model, but it's two constants away from any provider that speaks the chat completions format.</p></div>
+      <div><div class="ico">[honest]</div><h4>Never writes firewall rules directly</h4><p>Every ban goes through <code style="font-family:var(--mono);">fail2ban-client</code>. If you trust fail2ban already, you're not adding a new attack surface.</p></div>
+    </div>
+  </section>
+
+  <section id="install" class="wrap">
+    <p class="kicker">Install</p>
+    <h2>Running in about 10 minutes</h2>
+    <p class="section-lede">Full step-by-step instructions — jail config, systemd units, log rotation, and a verification checklist — are in the README. Here's the shape of it:</p>
+
+    <div class="install-box">
+      <div class="term-bar">
+        <div class="tdot" style="background:#3a3f44;"></div>
+        <div class="tdot" style="background:#3a3f44;"></div>
+        <div class="tdot" style="background:#3a3f44;"></div>
+        <span class="term-title">quickstart.sh</span>
+      </div>
+      <div class="term-body">
+        <div><span class="c"># 1. clone and place the script</span></div>
+        <div><span class="p">$</span> git clone https://github.com/github-deewhy/ai-watchdog.git &amp;&amp; cd ai-watchdog</div>
+        <div><span class="p">$</span> sudo cp watchdog.py /opt/ai-watchdog/</div>
+        <div>&nbsp;</div>
+        <div><span class="c"># 2. isolated venv + one dependency</span></div>
+        <div><span class="p">$</span> sudo python3 -m venv /opt/ai-watchdog/venv</div>
+        <div><span class="p">$</span> sudo /opt/ai-watchdog/venv/bin/pip install openai</div>
+        <div>&nbsp;</div>
+        <div><span class="c"># 3. drop in your API key, add the jail, enable the timer</span></div>
+        <div><span class="p">$</span> sudo systemctl enable --now ai-watchdog.timer</div>
+      </div>
+    </div>
+
+    <div class="reqs">
+      <span>Debian 13 / Ubuntu 24.04 LTS</span>
+      <span>Python 3.10+</span>
+      <span>fail2ban + nftables</span>
+      <span>OpenAI-compatible API key</span>
+    </div>
+
+    <div class="cta-row" style="margin-top:32px;margin-bottom:0;">
+      <a class="btn btn-primary" href="https://github.com/github-deewhy/ai-watchdog/releases/latest">Download the package ↗</a>
+      <a class="btn btn-ghost" href="https://github.com/github-deewhy/ai-watchdog#readme">Read the full README ↗</a>
+    </div>
+  </section>
+
+  <section id="upgrade" class="upsell">
+    <div class="wrap">
+      <p class="kicker">If you outgrow the jail</p>
+      <div class="upsell-card">
+        <div>
+          <h3>Want to see what it's banning, not just watch the log scroll by?</h3>
+          <p>ai-watchdog is deliberately headless — it's a jail, not a product. If you want a dashboard over the same Nginx traffic — trend charts, a top-adversary table, per-incident drill-down, and audit-ready reports — that's a different tool built for that job.</p>
+          <ul class="upsell-feats">
+            <li>SOC 2 / NIST CSF–style reports, generated on demand</li>
+            <li>Top-adversary attribution and trend charts, not just log lines</li>
+            <li>Local Ollama or your choice of cloud model — nothing locked in</li>
+            <li>Copy-pasteable firewall commands — still never applied automatically</li>
+          </ul>
+          <a class="btn btn-primary" href="#">Look at the Report Agent ↗</a>
+        </div>
+        <div class="upsell-panel">
+          <div class="row"><span>Detection</span><span class="val">Same log source</span></div>
+          <div class="row"><span>Output</span><span class="val">Dashboard + reports</span></div>
+          <div class="row"><span>Enforcement</span><span class="val">You click "copy"</span></div>
+          <div class="row"><span>AI backend</span><span class="val">Local or cloud, your choice</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="wrap">
+    <p class="kicker">FAQ</p>
+    <h2>Before you install it</h2>
+    <div class="faq-item">
+      <h4>Does this replace fail2ban?</h4>
+      <p>No. It adds one more jail alongside whatever jails you already run. All of fail2ban's existing logic keeps working exactly as it does today.</p>
+    </div>
+    <div class="faq-item">
+      <h4>Does it ever touch nftables or iptables directly?</h4>
+      <p>No. Every ban and unban goes through <code style="font-family:var(--mono);background:var(--bg-2);padding:1px 6px;border-radius:4px;">fail2ban-client</code>. If fail2ban is already something you trust with your firewall, this doesn't change that trust boundary.</p>
+    </div>
+    <div class="faq-item">
+      <h4>What happens if the AI provider is unreachable?</h4>
+      <p>Candidate IPs are logged and skipped for that cycle — nothing is banned or unbanned without a decision from the model. The script retries with backoff before giving up on a given sweep.</p>
+    </div>
+    <div class="faq-item">
+      <h4>Does log data leave my server?</h4>
+      <p>Flagged request lines are sent to whichever OpenAI-compatible API you configure. Review that provider's data-handling terms if your logs may contain sensitive request data.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <div class="foot-row">
+    <div class="brand"><span class="dot"></span>ai-watchdog</div>
+    <div class="foot-links">
+      <a href="https://github.com/github-deewhy/ai-watchdog#readme">Documentation</a>
+      <a href="https://github.com/github-deewhy/ai-watchdog">GitHub</a>
+      <a href="#upgrade">Report Agent (paid)</a>
+      <a href="https://github.com/github-deewhy/ai-watchdog/blob/main/LICENSE">MIT License</a>
+    </div>
+  </div>
+  <p class="foot-note">Self-hosted. Nothing calls home except your chosen AI provider's API. Firewall changes always require your fail2ban config to say yes.</p>
+</footer>
+
+<script>
+(function(){
+  var lines = [
+    {t:'2026-08-30 09:12:01 [INFO] Watchdog execution started', c:''},
+    {t:'2026-08-30 09:12:01 [INFO] Read 214 new log lines', c:''},
+    {t:'2026-08-30 09:12:01 [INFO] Identified 2 candidate IPs for AI evaluation', c:''},
+    {t:'2026-08-30 09:12:02 [INFO] AI evaluated 185.220.101.7 (Errors=9/11): decision=BAN', c:'ban'},
+    {t:'2026-08-30 09:12:02 [INFO] Banned 185.220.101.7: crafted RCE payload in query string', c:'ban'},
+    {t:'2026-08-30 09:12:03 [INFO] AI evaluated 66.249.66.1 (Errors=0/4): decision=IGNORE', c:'ignore'},
+    {t:'2026-08-30 09:12:03 [INFO] Watchdog execution finished', c:''},
+    {t:'2026-08-30 09:17:01 [INFO] Watchdog execution started', c:''},
+    {t:'2026-08-30 09:17:01 [INFO] Read 58 new log lines', c:''},
+    {t:'2026-08-30 09:17:01 [INFO] Identified 1 candidate IP for AI evaluation', c:''},
+    {t:'2026-08-30 09:17:02 [INFO] AI evaluated 185.220.101.7 (Errors=0/1): decision=UNBAN', c:'unban'},
+    {t:'2026-08-30 09:17:02 [INFO] Unbanned 185.220.101.7', c:'unban'},
+    {t:'2026-08-30 09:17:02 [INFO] Watchdog execution finished', c:''}
+  ];
+  var body = document.getElementById('termBody');
+  var i = 0;
+  function cls(c){
+    if(c==='ban') return 'tag-ban';
+    if(c==='ignore') return 'tag-ignore';
+    if(c==='unban') return 'tag-unban';
+    return '';
+  }
+  function step(){
+    if(i >= lines.length){
+      var cur = document.createElement('span');
+      cur.className='cursor';
+      body.appendChild(cur);
+      return;
+    }
+    var div = document.createElement('div');
+    div.className = 'ln ' + cls(lines[i].c);
+    div.textContent = lines[i].t;
+    body.appendChild(div);
+    i++;
+    setTimeout(step, 420);
+  }
+  step();
+})();
+</script>
+
+</body>
+</html>

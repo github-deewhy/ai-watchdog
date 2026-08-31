@@ -1,0 +1,71 @@
+# /etc/nginx/sites-available/wdog.deewhy.ovh
+#
+# STEP 2 — final config. Put this in place AFTER `certbot` has issued
+# the certificate (see instructions), then:
+#   sudo nginx -t && sudo systemctl reload nginx
+
+# Plain HTTP: keep the ACME challenge location alive for renewals,
+# send everything else to HTTPS.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name wdog.deewhy.ovh;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/wdog.deewhy.ovh;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name wdog.deewhy.ovh;
+
+    ssl_certificate     /etc/letsencrypt/live/wdog.deewhy.ovh/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/wdog.deewhy.ovh/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    access_log /var/log/nginx/wdog.deewhy.ovh.access.log;
+    error_log  /var/log/nginx/wdog.deewhy.ovh.error.log;
+
+    root /var/www/wdog.deewhy.ovh;
+    index index.html;
+
+    # ---- Landing page ----
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # ---- Version A: NVIDIA-NIM-backed build ----
+    # Fill in once that version is deployed. If it's a static build,
+    # point root at its own directory instead of proxy_pass; if it's the
+    # Express app from the docker-compose setup, proxy to its container port.
+    #
+    # location /v1-nvidia/ {
+    #     proxy_pass http://127.0.0.1:3015/;
+    #     proxy_set_header Host $host;
+    #     proxy_set_header X-Real-IP $remote_addr;
+    #     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    #     proxy_set_header X-Forwarded-Proto $scheme;
+    # }
+
+    # ---- Version B: local-Ollama-backed build (introduced later) ----
+    # Same pattern, different upstream port once that stage exists.
+    #
+    # location /v1-ollama/ {
+    #     proxy_pass http://127.0.0.1:3016/;
+    #     proxy_set_header Host $host;
+    #     proxy_set_header X-Real-IP $remote_addr;
+    #     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    #     proxy_set_header X-Forwarded-Proto $scheme;
+    # }
+}

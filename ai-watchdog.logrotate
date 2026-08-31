@@ -1,0 +1,19 @@
+# /etc/logrotate.d/ai-watchdog
+#
+# watchdog.py runs as a short-lived systemd oneshot process (triggered by
+# ai-watchdog.timer every 5 minutes) rather than a long-running daemon.
+# Each run opens /var/log/ai-watchdog.log fresh via logging.basicConfig()
+# and exits, so standard rename-based rotation is safe here — no
+# copytruncate or postrotate signal is needed, since there's no persistent
+# file handle held open between runs for logrotate to invalidate.
+
+/var/log/ai-watchdog.log {
+    weekly
+    rotate 8
+    maxsize 20M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root root
+}

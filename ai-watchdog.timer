@@ -1,0 +1,13 @@
+[Unit]
+Description=Run ai-watchdog.service every 5 minutes
+
+[Timer]
+# Fixed 5-minute cadence, replacing the old */15 cron schedule.
+OnCalendar=*:0/5
+# If the box was down/asleep when a run was due, catch up on boot.
+Persistent=true
+# Spreads load slightly if this unit is ever templated across many hosts.
+RandomizedDelaySec=10
+
+[Install]
+WantedBy=timers.target

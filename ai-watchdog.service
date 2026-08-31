@@ -1,0 +1,16 @@
+[Unit]
+Description=AI-driven Nginx security watchdog (single sweep)
+Wants=network-online.target
+After=network-online.target fail2ban.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/ai-watchdog/ai-watchdog.env
+ExecStart=/opt/ai-watchdog/venv/bin/python3 /opt/ai-watchdog/watchdog.py
+# Hardening: this script only needs to read nginx logs, write its own
+# state/log files, and shell out to fail2ban-client.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ai-watchdog /var/log
+PrivateTmp=true
