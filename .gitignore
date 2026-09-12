@@ -20,4 +20,4 @@ Thumbs.db
 ai-watchdog-git-ready.zip
 site/
 deploy/
-fail2ban-report.sh
+/fail2ban-report.sh
