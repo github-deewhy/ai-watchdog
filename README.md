@@ -1,9 +1,9 @@
 # AI-Driven Nginx Security Watchdog for Fail2ban
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![Version](https://img.shields.io/badge/version-1.1.0-informational.svg)](./CHANGELOG.md)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Version](https://img.shields.io/badge/version-1.2.0-informational.svg)
 
-**🌐 Live demo & landing page: [wdog.deewhy.ovh](https://wdog.deewhy.ovh)**
+🌐 **Live demo & landing page:** [wdog.deewhy.ovh](https://wdog.deewhy.ovh)
 
 This repo currently tracks the NVIDIA-NIM-backed build. A second,
 local-Ollama-backed build is planned as a separate track (see the
@@ -25,51 +25,48 @@ it adds one more jail, driven by a language model instead of a regex.
 
 ```
 Nginx Access & Error Logs
-        │
-        ▼
-  watchdog.py  (triggered on a timer)
-  - Inode & offset tracking (only reads new lines since last run)
-  - Exploit signature engine (LFI/RCE/SQLi/SSRF patterns)
-  - 4xx/5xx error-rate metrics
-        │
-  [Candidate IPs flagged: N+ suspicious hits OR N+ HTTP errors]
-        │
-        ▼
-  Hosted LLM (OpenAI-compatible chat completions API)
-        │
-  [Decision: BAN / IGNORE / UNBAN]
-        │
-        ▼
-  fail2ban-client  →  ai-watchdog jail (action-only, no filter/regex)
-        │
-        ▼
-  nftables  (kernel-level packet drop)
+         │
+         ▼
+   watchdog.py  (triggered on a timer)
+   - Inode & offset tracking (only reads new lines since last run)
+   - Exploit signature engine (LFI/RCE/SQLi/SSRF patterns)
+   - 4xx/5xx error-rate metrics
+         │
+   [Candidate IPs flagged: N+ suspicious hits OR N+ HTTP errors]
+         │
+         ▼
+   Hosted LLM (OpenAI-compatible chat completions API)
+         │
+   [Decision: BAN / IGNORE / UNBAN]
+         │
+         ▼
+   fail2ban-client  →  ai-watchdog jail (action-only, no filter/regex)
+         │
+         ▼
+   nftables  (kernel-level packet drop)
 ```
 
-The `ai-watchdog` fail2ban jail intentionally has **no filter or regex**
+The `ai-watchdog` fail2ban jail intentionally has no filter or regex
 (`filter =`, `logpath = /dev/null`). It exists purely to hold the ban
 action and duration — detection happens entirely in `watchdog.py`, which
 then calls `fail2ban-client banip` / `unbanip` directly.
 
----
-
 ## Table of contents
 
-1. [Features](#features)
-2. [Requirements](#requirements)
-3. [Package contents](#package-contents)
-4. [Installation](#installation)
-5. [Configuration reference](#configuration-reference)
-6. [Rate limiting design](#rate-limiting-design)
-7. [Troubleshooting](#troubleshooting)
-8. [Verification checklist](#verification-checklist)
-9. [Maintenance commands](#maintenance-commands)
-10. [Security notes](#security-notes)
-11. [Contributing](#contributing)
-12. [Roadmap](#roadmap)
-13. [Looking for a dashboard and reports, not just a jail?](#looking-for-a-dashboard-and-reports-not-just-a-jail)
-
----
+- [Features](#features)
+- [Requirements](#requirements)
+- [Package contents](#package-contents)
+- [Installation](#installation)
+- [Configuration reference](#configuration-reference)
+- [Rate limiting design](#rate-limiting-design)
+- [Interactive dashboard & JSON reporting](#interactive-dashboard--json-reporting)
+- [Troubleshooting](#troubleshooting)
+- [Verification checklist](#verification-checklist)
+- [Maintenance commands](#maintenance-commands)
+- [Security notes](#security-notes)
+- [Contributing](#contributing)
+- [Roadmap](#roadmap)
+- [Looking for a dashboard and reports, not just a jail?](#looking-for-a-dashboard-and-reports-not-just-a-jail)
 
 ## Features
 
@@ -80,10 +77,12 @@ then calls `fail2ban-client banip` / `unbanip` directly.
 - A sliding-window rate limiter that respects your AI provider's per-minute
   quota, including retries
 - Bans and unbans enforced by `fail2ban` + `nftables`, not by the script
-  itself — this project only ever *decides*, it never touches the firewall
+  itself — this project only ever decides, it never touches the firewall
   directly
 - A formatted, all-jails status report (`fail2ban-report.sh`) so you can see
   this jail next to every other jail you already run
+- **NEW:** JSON output mode for integration with external dashboards and monitoring tools
+- **NEW:** Interactive HTML dashboard with real-time sync capabilities
 - systemd timer + logrotate units included, ready to drop in
 
 ## Requirements
@@ -97,17 +96,19 @@ then calls `fail2ban-client banip` / `unbanip` directly.
   ([build.nvidia.com](https://build.nvidia.com), free tier available), but
   any OpenAI-compatible provider works — just change `NVIDIA_BASE_URL` and
   `NVIDIA_MODEL` in `watchdog.py`.
+- **Optional:** A web browser and local HTTP server (e.g., `python3 -m http.server`) for the interactive dashboard
 
 ## Package contents
 
 | File | Purpose |
-|---|---|
+| --- | --- |
 | `watchdog.py` | Main detection + AI classification script |
 | `ai-watchdog.service` | systemd oneshot unit that runs a single sweep |
 | `ai-watchdog.timer` | systemd timer firing the service periodically |
 | `ai-watchdog.env.example` | Template for your API key env file |
 | `ai-watchdog.logrotate` | logrotate config for `/var/log/ai-watchdog.log` |
-| `fail2ban-report.sh` | Formatted status report across all fail2ban jails |
+| `fail2ban-report.sh` | Formatted status report across all fail2ban jails (with JSON output) |
+| `f2b.html` | Interactive HTML dashboard for visualizing threat intelligence |
 | `LICENSE` | MIT license |
 | `CHANGELOG.md` | Version history |
 
@@ -173,14 +174,13 @@ sudo cp ai-watchdog.service ai-watchdog.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl start ai-watchdog.service   # manual dry run
 sudo tail -n 20 /var/log/ai-watchdog.log   # confirm no errors
-
 sudo systemctl enable --now ai-watchdog.timer
 systemctl list-timers ai-watchdog.timer    # confirm NEXT/LEFT is populated
 ```
 
-> Only the `.timer` is enabled. `ai-watchdog.service` has no `[Install]`
-> section by design — it's triggered by the timer, not meant to be enabled
-> or started at boot directly.
+Only the `.timer` is enabled. `ai-watchdog.service` has no `[Install]`
+section by design — it's triggered by the timer, not meant to be enabled
+or started at boot directly.
 
 ### 6. Log rotation
 
@@ -209,7 +209,43 @@ total across all jails. Reads the jail list dynamically, so it picks up
 new jails automatically. Colors auto-disable when output isn't a terminal
 (e.g. redirected to a file or cron mail).
 
-### 8. Before going live
+**JSON output mode:**
+
+```bash
+sudo fail2ban-report.sh --json                    # saves to f2b_status.json
+sudo fail2ban-report.sh --json custom_output.json # saves to custom filename
+```
+
+Generates a structured JSON file containing all jail metrics, banned IPs,
+and geolocation data. Perfect for integration with external dashboards,
+SIEM systems, or automated reporting pipelines.
+
+### 8. Interactive dashboard (optional)
+
+```bash
+sudo cp f2b.html /var/www/html/fail2ban-dashboard.html
+# OR serve locally:
+cd /path/to/dashboard
+python3 -m http.server 8000
+```
+
+Open your browser to `http://localhost:8000` (or your configured path).
+The dashboard automatically loads `f2b_status.json` and provides:
+
+- Real-time KPI metrics (active bans, blocked attempts, geographic distribution)
+- Interactive charts (jail enforcement metrics, attacker geography)
+- Comprehensive IP correlation matrix with quick-unban commands
+- Deterministic technical evaluation and hardening recommendations
+- Manual sync button to refresh data without reloading the page
+
+**Dashboard features:**
+
+- **Dual-mode data loading:** Automatic HTTP fetch (when served via web server) or manual file upload
+- **Filtered view:** Focuses exclusively on the `ai-watchdog` jail for clarity
+- **Search & filter:** Quickly find specific IPs or countries in the banned IP registry
+- **Zero hardcoded data:** Everything is dynamically generated from the JSON output
+
+### 9. Before going live
 
 - `watchdog.py` → `OWN_IPS`: replace `YOUR_ADMIN_IP_HERE` with this
   server's real admin IP(s), so you never self-ban.
@@ -220,7 +256,7 @@ new jails automatically. Colors auto-disable when output isn't a terminal
 ## Configuration reference
 
 | Setting | File | Default | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `NVIDIA_BASE_URL` / `NVIDIA_MODEL` | `watchdog.py` | NVIDIA NIM, `nvidia/nemotron-3-nano-30b-a3b` | Point at any OpenAI-compatible endpoint |
 | `OWN_IPS` | `watchdog.py` | `{"127.0.0.1"}` | Admin/operator IPs excluded from banning |
 | `MIN_EVENTS_FOR_AI` | `watchdog.py` | `3` | Minimum suspicious hits or HTTP errors before a candidate IP is sent to the AI |
@@ -231,7 +267,7 @@ new jails automatically. Colors auto-disable when output isn't a terminal
 
 ## Rate limiting design
 
-The script does **not** use a fixed `sleep()` between calls. It uses a
+The script does not use a fixed `sleep()` between calls. It uses a
 sliding-window limiter (`RateLimiter` class in `watchdog.py`): it tracks
 the timestamp of every API call made in the last 60 seconds and blocks
 before exceeding the configured per-minute budget. This is stricter than
@@ -239,13 +275,62 @@ fixed spacing because it also absorbs bursts (e.g. an overlapping manual
 run), and every retry attempt — not just the first try — counts against
 the budget, so backoff loops can't quietly exceed your quota.
 
+## Interactive dashboard & JSON reporting
+
+The project now includes a comprehensive visualization layer for monitoring
+your AI-driven security posture:
+
+**JSON output format:**
+
+```json
+{
+  "timestamp": "2026-09-11 16:33:24 CEST",
+  "total_jails": 10,
+  "totals": {
+    "currently_banned": 65,
+    "total_banned": 76,
+    "currently_failed": 0,
+    "total_failed": 320
+  },
+  "jails": [
+    {
+      "name": "ai-watchdog",
+      "status": "active",
+      "currently_banned": 55,
+      "total_banned": 56,
+      "currently_failed": 0,
+      "total_failed": 0,
+      "log_files": ["/dev/null"],
+      "banned_ips": [
+        { "ip": "101.36.127.131", "country": "HK" },
+        { "ip": "130.12.180.117", "country": "US" }
+      ]
+    }
+  ]
+}
+```
+
+**Dashboard capabilities:**
+
+- **Geolocation tracking:** Automatic IP-to-country mapping via `geoiplookup`
+- **Multi-vector detection:** Identifies IPs banned across multiple jails
+- **Infrastructure analysis:** Highlights cloud provider ranges (GCP, DigitalOcean, OVH, AWS)
+- **Threat correlation:** Cross-references jail activity to reveal persistent botnet nodes
+- **Actionable insights:** Deterministic technical evaluation with hardening recommendations
+
+**Deployment options:**
+
+1. **Local development:** `python3 -m http.server 8000` in the directory containing `f2b.html` and `f2b_status.json`
+2. **Production web server:** Place both files in your web root (e.g., `/var/www/html/`)
+3. **Cron-based refresh:** Add `*/5 * * * * /usr/local/bin/fail2ban-report.sh --json` to automatically regenerate the JSON every 5 minutes
+
 ## Troubleshooting
 
 ### `pip install openai` fails with `uninstall-no-record-file`
 
 This happens because `openai`'s dependency `typing_extensions` is already
 installed by apt, and apt-installed packages don't carry pip's `RECORD`
-metadata, so pip refuses to safely upgrade/uninstall it. **Fix:** use the
+metadata, so pip refuses to safely upgrade/uninstall it. Fix: use the
 dedicated venv described in step 2 instead of installing into system
 Python — this sidesteps the conflict entirely rather than forcing past it.
 
@@ -260,11 +345,22 @@ status page before assuming a config problem.
 
 Usually one of:
 
-1. `openai` was never actually installed — verify with
-   `sudo /opt/ai-watchdog/venv/bin/pip show openai`.
-2. `ai-watchdog.service`'s `ExecStart` still points at `/usr/bin/python3`
-   instead of `/opt/ai-watchdog/venv/bin/python3` — check with
-   `grep ExecStart /etc/systemd/system/ai-watchdog.service`.
+- `openai` was never actually installed — verify with
+  `sudo /opt/ai-watchdog/venv/bin/pip show openai`.
+- `ai-watchdog.service`'s `ExecStart` still points at `/usr/bin/python3`
+  instead of `/opt/ai-watchdog/venv/bin/python3` — check with
+  `grep ExecStart /etc/systemd/system/ai-watchdog.service`.
+
+### Dashboard shows "Failed to fetch f2b_status.json"
+
+This is expected when opening `f2b.html` directly via `file://` protocol.
+Modern browsers block cross-origin requests from local files for security.
+
+**Solutions:**
+
+1. Serve via HTTP: `python3 -m http.server 8000` then visit `http://localhost:8000`
+2. Use the "📁 Load JSON" button to manually select the file
+3. Ensure `f2b_status.json` exists in the same directory as `f2b.html`
 
 ### Forcing a manual end-to-end test
 
@@ -294,6 +390,8 @@ systemctl list-timers ai-watchdog.timer                   # NEXT time populated
 sudo fail2ban-client status ai-watchdog                    # jail exists
 sudo /opt/ai-watchdog/venv/bin/pip show openai             # installed in venv
 sudo tail -n 20 /var/log/ai-watchdog.log                   # clean runs, no tracebacks
+sudo fail2ban-report.sh --json                             # JSON output works
+ls -la f2b_status.json                                     # JSON file created
 ```
 
 ## Maintenance commands
@@ -303,6 +401,8 @@ sudo fail2ban-client status ai-watchdog        # active bans
 sudo tail -f /var/log/ai-watchdog.log          # live AI decisions
 sudo nft list table inet f2b-table             # kernel firewall state
 sudo fail2ban-client set ai-watchdog unbanip <IP>
+sudo fail2ban-report.sh                        # formatted CLI report
+sudo fail2ban-report.sh --json                 # generate JSON for dashboard
 ```
 
 ## Security notes
@@ -321,6 +421,9 @@ sudo fail2ban-client set ai-watchdog unbanip <IP>
 - Log contents (including request paths and user agents) are sent to
   whichever AI provider you configure. Review that provider's data-handling
   terms before pointing this at logs that may contain sensitive data.
+- The JSON output file (`f2b_status.json`) contains IP addresses and
+  geolocation data. Ensure appropriate file permissions if deploying the
+  dashboard on a public-facing web server.
 
 ## Contributing
 
@@ -336,7 +439,7 @@ This project ships as two independent build tracks against the same
 `watchdog.py` core, differing only in where classification happens:
 
 | Track | Status | Classification runs | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | NVIDIA NIM (this repo, `main`) | Live | Hosted API (`build.nvidia.com`) | Free tier available, no local GPU needed |
 | Local Ollama | Planned | On-box, fully offline | For deployments that can't send log data off-host |
 
@@ -351,10 +454,15 @@ jail — no UI, no history, no compliance reports. If you want a visual
 dashboard over your Nginx security data — trend charts, a top-adversary
 table, per-incident forensic drill-down, and audit-ready SOC 2 / NIST CSF
 style reports generated by your choice of local or cloud AI model — see
-the companion **AI Security Intelligence & Report Agent**. It reads the
+the companion AI Security Intelligence & Report Agent. It reads the
 same Nginx logs this project does, but as a reporting/monitoring layer
 rather than an enforcement one (it never touches your firewall either —
 it only ever generates copy-pasteable remediation commands).
+
+**Note:** This repo now includes `f2b.html`, a lightweight interactive
+dashboard focused on the `ai-watchdog` jail. For comprehensive multi-jail
+analytics, historical trending, and compliance reporting, the companion
+tool remains the recommended choice.
 
 ## License
 

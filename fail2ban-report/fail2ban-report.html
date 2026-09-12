@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fail2ban Threat Intelligence & System Security Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-body: #0b0f19;
+            --bg-card: #111827;
+            --bg-card-hover: #1f2937;
+            --bg-header: #131c2e;
+            --border-color: #1f2937;
+            --border-accent: #374151;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-cyan: #06b6d4;
+            --accent-blue: #3b82f6;
+            --accent-indigo: #6366f1;
+            --accent-purple: #8b5cf6;
+            --accent-emerald: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-rose: #f43f5e;
+            --status-active-bg: rgba(16, 185, 129, 0.15);
+            --status-active-text: #10b981;
+            --status-idle-bg: rgba(107, 114, 128, 0.15);
+            --status-idle-text: #9ca3af;
+            --status-danger-bg: rgba(244, 63, 94, 0.15);
+            --status-danger-text: #f43f5e;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 24px;
+            max-width: 1440px;
+            margin: 0 auto;
+        }
+        header {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 1px solid var(--border-accent);
+            border-radius: 16px;
+            padding: 28px 32px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .header-title-section { display: flex; align-items: center; gap: 16px; }
+        .shield-icon {
+            width: 48px; height: 48px;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+        }
+        .shield-icon svg { width: 28px; height: 28px; fill: #ffffff; }
+        .header-text h1 {
+            font-size: 24px; font-weight: 700; letter-spacing: -0.02em;
+            color: #ffffff; display: flex; align-items: center; gap: 12px;
+        }
+        .header-text p { font-size: 14px; color: var(--text-secondary); margin-top: 4px; }
+        .header-meta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .meta-pill {
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px; border-radius: 30px;
+            font-size: 13px; font-weight: 500;
+            display: flex; align-items: center; gap: 8px;
+            color: var(--text-secondary);
+        }
+        .meta-pill strong { color: var(--text-primary); }
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background-color: var(--accent-emerald);
+            box-shadow: 0 0 8px var(--accent-emerald);
+        }
+        .sync-btn { cursor: pointer; transition: all 0.2s; }
+        .sync-btn:hover { background-color: rgba(255, 255, 255, 0.1); }
+        .kpi-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px; margin-bottom: 24px;
+        }
+        .kpi-card {
+            background-color: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: 12px; padding: 20px;
+            transition: transform 0.2s, border-color 0.2s;
+            position: relative; overflow: hidden;
+        }
+        .kpi-card:hover { transform: translateY(-2px); border-color: var(--border-accent); }
+        .kpi-card::before {
+            content: ''; position: absolute; top: 0; left: 0;
+            width: 4px; height: 100%; background: var(--card-accent, var(--accent-blue));
+        }
+        .kpi-card.rose::before { background: var(--accent-rose); }
+        .kpi-card.amber::before { background: var(--accent-amber); }
+        .kpi-card.emerald::before { background: var(--accent-emerald); }
+        .kpi-card.cyan::before { background: var(--accent-cyan); }
+        .kpi-card.purple::before { background: var(--accent-purple); }
+        .kpi-label {
+            font-size: 13px; font-weight: 500; color: var(--text-secondary);
+            margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .kpi-value {
+            font-size: 28px; font-weight: 700; color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .kpi-subtext { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+        .grid-2 {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 24px; margin-bottom: 24px;
+        }
+        @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+        .card {
+            background-color: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: 14px; padding: 24px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        .card-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);
+        }
+        .card-title {
+            font-size: 16px; font-weight: 600; color: var(--text-primary);
+            display: flex; align-items: center; gap: 10px;
+        }
+        .card-title svg { width: 20px; height: 20px; fill: var(--accent-cyan); }
+        .chart-container { position: relative; height: 280px; width: 100%; }
+        .table-responsive { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+        th {
+            background-color: rgba(255, 255, 255, 0.02); color: var(--text-secondary);
+            font-weight: 600; padding: 12px 16px; border-bottom: 1px solid var(--border-color);
+            text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em;
+        }
+        td {
+            padding: 12px 16px; border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary); vertical-align: middle;
+        }
+        tr:hover td { background-color: var(--bg-card-hover); }
+        .badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+        }
+        .badge-active {
+            background-color: var(--status-active-bg); color: var(--status-active-text);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        .badge-idle {
+            background-color: var(--status-idle-bg); color: var(--status-idle-text);
+            border: 1px solid rgba(156, 163, 175, 0.2);
+        }
+        .badge-danger {
+            background-color: var(--status-danger-bg); color: var(--status-danger-text);
+            border: 1px solid rgba(244, 63, 94, 0.3);
+        }
+        .badge-country {
+            background-color: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-color);
+            font-family: 'JetBrains Mono', monospace; padding: 2px 8px; border-radius: 4px;
+        }
+        .ip-code {
+            font-family: 'JetBrains Mono', monospace; font-weight: 500; color: var(--accent-cyan);
+        }
+        .eval-section { margin-bottom: 24px; }
+        .eval-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;
+        }
+        .eval-card {
+            background-color: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: 12px; padding: 20px;
+        }
+        .eval-card h3 {
+            font-size: 15px; font-weight: 600; color: var(--accent-cyan);
+            margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+        }
+        .eval-card p { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+        .eval-card ul { list-style: none; padding-left: 0; }
+        .eval-card li {
+            font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;
+            position: relative; padding-left: 18px;
+        }
+        .eval-card li::before {
+            content: '•'; position: absolute; left: 0;
+            color: var(--accent-blue); font-weight: bold;
+        }
+        .rec-box {
+            background: linear-gradient(135deg, rgba(17, 24, 39, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+            border: 1px solid var(--border-accent); border-left: 4px solid var(--accent-amber);
+            border-radius: 12px; padding: 20px; margin-top: 16px;
+        }
+        .rec-box h4 {
+            font-size: 14px; font-weight: 600; color: var(--accent-amber);
+            margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+        }
+        .rec-box p { font-size: 13px; color: var(--text-secondary); }
+        code {
+            background-color: rgba(0, 0, 0, 0.4); border: 1px solid var(--border-color);
+            padding: 2px 6px; border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent-cyan);
+        }
+        .search-box {
+            padding: 8px 14px; background-color: rgba(0,0,0,0.3);
+            border: 1px solid var(--border-color); border-radius: 8px;
+            color: var(--text-primary); font-size: 13px; outline: none; width: 240px;
+        }
+        .search-box:focus { border-color: var(--accent-cyan); }
+        footer {
+            margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border-color);
+            text-align: center; font-size: 12px; color: var(--text-muted);
+        }
+        .loading-overlay {
+            text-align: center; padding: 40px; color: var(--text-muted); font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title-section">
+            <div class="shield-icon">
+                <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-5.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+            </div>
+            <div class="header-text">
+                <h1>Fail2ban Security Audit & Threat Intelligence</h1>
+                <p>Automated Perimeter Defense Analysis • Incident Timestamp: <span id="incident-timestamp">Waiting for data...</span></p>
+            </div>
+        </div>
+        <div class="header-meta">
+            <div class="meta-pill">
+                <div class="status-dot"></div>
+                System Posture: <strong id="system-posture">UNKNOWN</strong>
+            </div>
+            <div class="meta-pill">
+                Active Jails: <strong id="kpi-active-jails">-- / --</strong>
+            </div>
+            <input type="file" id="fileInput" accept=".json" style="display: none;">
+            <button class="meta-pill sync-btn" onclick="document.getElementById('fileInput').click()">📁 Load JSON</button>
+            <button class="meta-pill sync-btn" id="syncBtn" onclick="fetchData()" style="border-color: var(--accent-emerald); color: var(--accent-emerald);">🔄 Sync Data</button>
+        </div>
+    </header>
+
+    <div class="kpi-grid">
+        <div class="kpi-card rose">
+            <div class="kpi-label">Active Banned IPs</div>
+            <div class="kpi-value" id="kpi-active-banned">--</div>
+            <div class="kpi-subtext">Currently blocked at firewall level</div>
+        </div>
+        <div class="kpi-card amber">
+            <div class="kpi-label">Blocked Attempts</div>
+            <div class="kpi-value" id="kpi-blocked-attempts">--</div>
+            <div class="kpi-subtext">Total historical security violations</div>
+        </div>
+        <div class="kpi-card emerald">
+            <div class="kpi-label">Cumulative Bans</div>
+            <div class="kpi-value" id="kpi-cumulative-bans">--</div>
+            <div class="kpi-subtext">Total ban actions triggered</div>
+        </div>
+        <div class="kpi-card cyan">
+            <div class="kpi-label">Multi-Vector IPs</div>
+            <div class="kpi-value" id="kpi-multi-vector">--</div>
+            <div class="kpi-subtext">Banned in multiple jails</div>
+        </div>
+        <div class="kpi-card purple">
+            <div class="kpi-label">Primary Attack Country</div>
+            <div class="kpi-value" id="kpi-primary-country">--</div>
+            <div class="kpi-subtext" id="kpi-primary-subtext">Unique malicious IP endpoints</div>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
+                    Jail Enforcement Metrics Breakdown
+                </div>
+            </div>
+            <div class="chart-container"><canvas id="jailChart"></canvas></div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                    Top Attacker Geographic Distribution
+                </div>
+            </div>
+            <div class="chart-container"><canvas id="geoChart"></canvas></div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 24px;">
+        <div class="card-header">
+            <div class="card-title">
+                <svg viewBox="0 0 24 24"><path d="M4 14h4v-4H4v4zm0 5h4v-4H4v4zM4 9h4V5H4v4zm5 5h12v-4H9v4zm0 5h12v-4H9v4zM9 5v4h12V5H9z"/></svg>
+                Fail2ban Jail Status Summary
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Jail Identifier</th>
+                        <th>Status</th>
+                        <th>Active Banned</th>
+                        <th>Total Banned</th>
+                        <th>Current Failed</th>
+                        <th>Total Failed</th>
+                        <th>Log Target</th>
+                    </tr>
+                </thead>
+                <tbody id="jail-summary-body">
+                    <tr><td colspan="7" class="loading-overlay">Waiting for JSON data sync...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card eval-section">
+        <div class="card-header">
+            <div class="card-title">
+                <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+                In-Depth Technical Evaluation & Threat Vectors
+            </div>
+        </div>
+        <div class="eval-grid">
+            <div class="eval-card">
+                <h3>1. AI-Watchdog Dynamic Defense Vector</h3>
+                <p>The <code>ai-watchdog</code> jail typically accounts for the majority of active bans. Key architectural observations:</p>
+                <ul>
+                    <li><strong>Log Redirection:</strong> Log destination is often bound to <code>/dev/null</code>, indicating real-time threat feed ingestion or synthetic event triggering.</li>
+                    <li><strong>Infrastructure Sourcing:</strong> Heavy concentration of Google Cloud Platform, DigitalOcean, and OVH ranges.</li>
+                    <li><strong>Efficacy:</strong> Highly effective proactive blocking against distributed automated web scrapers and botnet egress nodes.</li>
+                </ul>
+            </div>
+            <div class="eval-card">
+                <h3>2. Nginx Web Application Reconnaissance</h3>
+                <p>Web layer logs reveal structured scanning behavior aimed at discovery and vulnerability exploitation:</p>
+                <ul>
+                    <li><strong>404 Probe Surge:</strong> High volume of resource discovery (scanning for <code>/wp-admin</code>, <code>.env</code>, database dumps).</li>
+                    <li><strong>NoScript Execution:</strong> Target probing against unindexed executable files or script extensions.</li>
+                    <li><strong>400 Bad Requests:</strong> Malformed protocol payloads or header fuzzing attempts.</li>
+                </ul>
+            </div>
+            <div class="eval-card">
+                <h3>3. Multi-Vector Attackers & Correlation</h3>
+                <p>Cross-referencing jail activity reveals sophisticated attacker persistence:</p>
+                <ul>
+                    <li><strong>Cross-Jail Overlap:</strong> Attackers frequently trigger both <code>ai-watchdog</code> and <code>nginx-noscript</code> rules.</li>
+                    <li><strong>Persistent Botnet Nodes:</strong> Examples often include IPs from HK, GB, BG, and US ranges.</li>
+                    <li><strong>Implication:</strong> Attackers utilize secondary web exploitation vectors when primary automated probes encounter initial restrictions.</li>
+                </ul>
+            </div>
+        </div>
+        <div class="rec-box">
+            <h4>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                Actionable Security Hardening Recommendations
+            </h4>
+            <p>1. <strong>Tuning <code>nginx-404</code> Jail Parameters:</strong> Increase <code>bantime</code> (e.g. from default 10m to 24h) or decrease <code>maxretry</code>. High 404-probes yielding 0 current active bans indicates attackers are pacing probes to out-wait short ban durations.</p>
+            <p>2. <strong>Enable Persistent Logging for AI-Watchdog:</strong> Change log target from <code>/dev/null</code> to a dedicated file (e.g., <code>/var/log/fail2ban-ai.log</code>) to retain forensic evidence for incident response.</p>
+            <p>3. <strong>Cloud Provider ASN Rate Limiting:</strong> Over 60% of hostile IPs belong to public cloud providers. Implement Cloudflare WAF or IPset rules to challenge non-residential cloud proxies.</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">
+                <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-5.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+                Active Banned IP Registry & Correlation Matrix
+            </div>
+            <input type="text" id="ipSearch" class="search-box" placeholder="Search IP or Country..." onkeyup="filterTable()">
+        </div>
+        <div class="table-responsive" style="max-height: 480px; overflow-y: auto;">
+            <table id="ipTable">
+                <thead>
+                    <tr>
+                        <th>IP Address</th>
+                        <th>Country</th>
+                        <th>Assigned Fail2ban Jails</th>
+                        <th>Threat Profile</th>
+                        <th>Quick Unban Command</th>
+                    </tr>
+                </thead>
+                <tbody id="ipTableBody">
+                    <tr><td colspan="5" class="loading-overlay">Waiting for JSON data sync...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <footer>
+        <p>Generated by Fail2ban Analytics Module • Interactive Report & Infrastructure Security Diagnostics • 2026</p>
+    </footer>
+
+    <script>
+        let chartJailInstance = null;
+        let chartGeoInstance = null;
+        let currentBannedIPs = [];
+
+        function updateDashboard(data) {
+            if (data.timestamp) {
+                document.getElementById('incident-timestamp').textContent = data.timestamp;
+            }
+
+            // FILTER: Only process ai-watchdog jail
+            const watchdogJail = data.jails.find(j => j.name === 'ai-watchdog');
+            
+            if (!watchdogJail) {
+                console.error('ai-watchdog jail not found in data');
+                return;
+            }
+
+            // Calculate metrics from ai-watchdog only
+            const activeJailsCount = watchdogJail.status === 'active' ? 1 : 0;
+            document.getElementById('kpi-active-jails').textContent = `${activeJailsCount} / 1 Monitored`;
+            document.getElementById('kpi-active-banned').textContent = watchdogJail.currently_banned;
+            document.getElementById('kpi-blocked-attempts').textContent = watchdogJail.total_failed;
+            document.getElementById('kpi-cumulative-bans').textContent = watchdogJail.total_banned;
+
+            const posture = watchdogJail.currently_banned > 50 ? 'HIGH THREAT' : (watchdogJail.currently_banned > 10 ? 'MODERATE THREAT' : 'LOW THREAT');
+            document.getElementById('system-posture').textContent = posture;
+            document.getElementById('system-posture').style.color = posture === 'HIGH THREAT' ? 'var(--accent-rose)' : (posture === 'MODERATE THREAT' ? 'var(--accent-amber)' : 'var(--accent-emerald)');
+
+            // Build IP map for ai-watchdog only
+            const ipJailMap = {};
+            watchdogJail.banned_ips.forEach(bip => {
+                ipJailMap[bip.ip] = { country: bip.country, jails: ['ai-watchdog'] };
+            });
+
+            const multiVectorCount = 0; // No multi-vector since we only have one jail
+            document.getElementById('kpi-multi-vector').textContent = multiVectorCount;
+
+            // Primary country calculation
+            const countryCounts = {};
+            Object.values(ipJailMap).forEach(v => {
+                const c = v.country || 'N/A';
+                countryCounts[c] = (countryCounts[c] || 0) + 1;
+            });
+            const sortedCountries = Object.entries(countryCounts).sort((a, b) => b[1] - a[1]);
+            const primaryCountry = sortedCountries.length > 0 ? sortedCountries[0][0] : 'N/A';
+            const primaryCount = sortedCountries.length > 0 ? sortedCountries[0][1] : 0;
+            const totalUniqueIPs = Object.keys(ipJailMap).length;
+            const percentage = totalUniqueIPs > 0 ? ((primaryCount / totalUniqueIPs) * 100).toFixed(1) : 0;
+            
+            document.getElementById('kpi-primary-country').textContent = `${primaryCountry} (${percentage}%)`;
+            document.getElementById('kpi-primary-subtext').textContent = `${totalUniqueIPs} unique malicious IP endpoints`;
+
+            // Render Jail Summary Table (ai-watchdog only)
+            const tbody = document.getElementById('jail-summary-body');
+            tbody.innerHTML = '';
+            
+            const statusClass = watchdogJail.status === 'active' ? 'badge-active' : 'badge-idle';
+            const statusText = watchdogJail.status === 'active' ? '● Active' : 'Idle';
+            const logTarget = watchdogJail.log_files.length > 0 ? watchdogJail.log_files.join(', ') : 'N/A';
+            const isHighFail = watchdogJail.total_failed > 100;
+            
+            tbody.innerHTML = `
+                <tr>
+                    <td><strong style="color: var(--accent-cyan)">${watchdogJail.name}</strong></td>
+                    <td><span class="badge ${statusClass}">${statusText}</span></td>
+                    <td><strong style="color: ${watchdogJail.currently_banned > 0 ? 'var(--accent-rose)' : 'var(--text-primary)'}">${watchdogJail.currently_banned}</strong></td>
+                    <td>${watchdogJail.total_banned}</td>
+                    <td>${watchdogJail.currently_failed}</td>
+                    <td>${isHighFail ? `<strong style="color: var(--accent-amber)">${watchdogJail.total_failed}</strong>` : watchdogJail.total_failed}</td>
+                    <td><code>${logTarget}</code></td>
+                </tr>
+            `;
+
+            // Render IP Correlation Table (ai-watchdog only)
+            const sortedIPs = Object.entries(ipJailMap).sort((a, b) => a[0].localeCompare(b[0]));
+
+            const ipTableBody = document.getElementById('ipTableBody');
+            ipTableBody.innerHTML = '';
+            currentBannedIPs = [];
+            
+            sortedIPs.forEach(([ip, ipData]) => {
+                const jailsHtml = '<span class="badge badge-active">ai-watchdog</span>';
+                const primaryJail = 'ai-watchdog';
+                const notes = 'AI Watchdog Heuristic';
+                
+                currentBannedIPs.push({ ip, country: ipData.country, jails: ipData.jails, multi: false, notes });
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><span class="ip-code">${ip}</span></td>
+                    <td><span class="badge-country">${ipData.country}</span></td>
+                    <td>${jailsHtml}</td>
+                    <td>
+                        <span style="color:var(--text-secondary)">Standard Threat</span>
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${notes}</div>
+                    </td>
+                    <td><code>sudo fail2ban-client set ${primaryJail} unbanip ${ip}</code></td>
+                `;
+                ipTableBody.appendChild(tr);
+            });
+
+            updateCharts(watchdogJail, ipJailMap);
+        }
+
+        function updateCharts(watchdogJail, ipJailMap) {
+            Chart.defaults.color = '#9ca3af';
+            Chart.defaults.font.family = 'Inter';
+
+            // Chart 1: Single jail metrics
+            const ctxJail = document.getElementById('jailChart').getContext('2d');
+            if (chartJailInstance) chartJailInstance.destroy();
+            
+            chartJailInstance = new Chart(ctxJail, {
+                type: 'bar',
+                data: {
+                    labels: [watchdogJail.name],
+                    datasets: [
+                        { label: 'Currently Banned', data: [watchdogJail.currently_banned], backgroundColor: '#f43f5e', borderRadius: 4 },
+                        { label: 'Total Banned', data: [watchdogJail.total_banned], backgroundColor: '#3b82f6', borderRadius: 4 },
+                        { label: 'Total Failures Blocked', data: [watchdogJail.total_failed], backgroundColor: '#f59e0b', borderRadius: 4 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { x: { grid: { color: '#1f2937' } }, y: { grid: { color: '#1f2937' }, beginAtZero: true } },
+                    plugins: { legend: { position: 'top', labels: { boxWidth: 12 } } }
+                }
+            });
+
+            // Chart 2: Geographic distribution
+            const countryCounts = {};
+            Object.values(ipJailMap).forEach(v => {
+                const c = v.country || 'N/A';
+                countryCounts[c] = (countryCounts[c] || 0) + 1;
+            });
+            const sortedCountries = Object.entries(countryCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+            const otherCount = Object.values(countryCounts).reduce((a, b) => a + b, 0) - sortedCountries.reduce((a, b) => a + b[1], 0);
+            
+            const geoLabels = sortedCountries.map(c => c[0]);
+            const geoCounts = sortedCountries.map(c => c[1]);
+            if (otherCount > 0) { geoLabels.push('Others'); geoCounts.push(otherCount); }
+
+            const ctxGeo = document.getElementById('geoChart').getContext('2d');
+            if (chartGeoInstance) chartGeoInstance.destroy();
+
+            chartGeoInstance = new Chart(ctxGeo, {
+                type: 'doughnut',
+                data: {
+                    labels: geoLabels,
+                    datasets: [{
+                        data: geoCounts,
+                        backgroundColor: ['#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#6366f1', '#14b8a6', '#6b7280'],
+                        borderWidth: 2, borderColor: '#111827'
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+                    cutout: '65%'
+                }
+            });
+        }
+
+        async function fetchData() {
+            const btn = document.getElementById('syncBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⏳ Syncing...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('./f2b_status.json?t=' + Date.now());
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const json = await response.json();
+                updateDashboard(json);
+                btn.innerHTML = '✅ Synced';
+                setTimeout(() => { btn.innerHTML = originalText; btn.disabled = false; }, 2000);
+            } catch (err) {
+                console.error('Fetch failed:', err);
+                alert('Failed to fetch f2b_status.json. Ensure the file exists and you are serving via HTTP, or use the "Load JSON" button.');
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                try {
+                    const json = JSON.parse(event.target.result);
+                    updateDashboard(json);
+                    alert('Local JSON loaded successfully!');
+                } catch (err) {
+                    alert('Invalid JSON file: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        function filterTable() {
+            const query = document.getElementById('ipSearch').value.toLowerCase();
+            const filtered = currentBannedIPs.filter(item => 
+                item.ip.toLowerCase().includes(query) || 
+                item.country.toLowerCase().includes(query) ||
+                item.jails.some(j => j.toLowerCase().includes(query)) ||
+                item.notes.toLowerCase().includes(query)
+            );
+            
+            const ipTableBody = document.getElementById('ipTableBody');
+            ipTableBody.innerHTML = '';
+            filtered.forEach(item => {
+                const tr = document.createElement('tr');
+                const jailsHtml = '<span class="badge badge-active">ai-watchdog</span>';
+                const primaryJail = 'ai-watchdog';
+                
+                tr.innerHTML = `
+                    <td><span class="ip-code">${item.ip}</span></td>
+                    <td><span class="badge-country">${item.country}</span></td>
+                    <td>${jailsHtml}</td>
+                    <td>
+                        <span style="color:var(--text-secondary)">Standard Threat</span>
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${item.notes}</div>
+                    </td>
+                    <td><code>sudo fail2ban-client set ${primaryJail} unbanip ${item.ip}</code></td>
+                `;
+                ipTableBody.appendChild(tr);
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            fetch('./f2b_status.json?t=' + Date.now())
+                .then(res => res.ok ? res.json() : Promise.reject())
+                .then(json => {
+                    updateDashboard(json);
+                })
+                .catch(() => {
+                    console.log('Auto-fetch skipped or failed. Use "Sync Data" or "Load JSON" to populate the dashboard.');
+                });
+        });
+    </script>
+</body>
+</html>
