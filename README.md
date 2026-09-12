@@ -108,7 +108,7 @@ then calls `fail2ban-client banip` / `unbanip` directly.
 | `ai-watchdog.env.example` | Template for your API key env file |
 | `ai-watchdog.logrotate` | logrotate config for `/var/log/ai-watchdog.log` |
 | `fail2ban-report.sh` | Formatted status report across all fail2ban jails (with JSON output) |
-| `f2b.html` | Interactive HTML dashboard for visualizing threat intelligence |
+| `fail2ban-report.html` | Interactive HTML dashboard for visualizing threat intelligence |
 | `LICENSE` | MIT license |
 | `CHANGELOG.md` | Version history |
 
@@ -223,14 +223,15 @@ SIEM systems, or automated reporting pipelines.
 ### 8. Interactive dashboard (optional)
 
 ```bash
-sudo cp f2b.html /var/www/html/fail2ban-dashboard.html
+sudo cp fail2ban-report.html /var/www/html/
 # OR serve locally:
 cd /path/to/dashboard
 python3 -m http.server 8000
 ```
 
-Open your browser to `http://localhost:8000` (or your configured path).
-The dashboard automatically loads `f2b_status.json` and provides:
+Open your browser to `http://localhost:8000/fail2ban-report.html` (or your
+configured path). On load — and whenever you click **🔄 Sync Data** — the
+dashboard fetches `f2b_status.json` from the same directory and provides:
 
 - Real-time KPI metrics (active bans, blocked attempts, geographic distribution)
 - Interactive charts (jail enforcement metrics, attacker geography)
@@ -320,9 +321,9 @@ your AI-driven security posture:
 
 **Deployment options:**
 
-1. **Local development:** `python3 -m http.server 8000` in the directory containing `f2b.html` and `f2b_status.json`
+1. **Local development:** `python3 -m http.server 8000` in the directory containing `fail2ban-report.html` and `f2b_status.json`
 2. **Production web server:** Place both files in your web root (e.g., `/var/www/html/`)
-3. **Cron-based refresh:** Add `*/5 * * * * /usr/local/bin/fail2ban-report.sh --json` to automatically regenerate the JSON every 5 minutes
+3. **Cron-based refresh:** Add `*/5 * * * * /usr/local/bin/fail2ban-report.sh --json /var/www/html/f2b_status.json` to automatically regenerate the JSON every 5 minutes, so the dashboard always has fresh data waiting the next time someone opens it or hits **🔄 Sync Data**
 
 ## Troubleshooting
 
@@ -353,14 +354,21 @@ Usually one of:
 
 ### Dashboard shows "Failed to fetch f2b_status.json"
 
-This is expected when opening `f2b.html` directly via `file://` protocol.
-Modern browsers block cross-origin requests from local files for security.
+This is expected when opening `fail2ban-report.html` directly via `file://`
+protocol. Modern browsers block cross-origin requests from local files for
+security — the dashboard's auto-fetch and **🔄 Sync Data** button only work
+when the page is served over HTTP.
 
 **Solutions:**
 
-1. Serve via HTTP: `python3 -m http.server 8000` then visit `http://localhost:8000`
-2. Use the "📁 Load JSON" button to manually select the file
-3. Ensure `f2b_status.json` exists in the same directory as `f2b.html`
+1. Serve via HTTP: `python3 -m http.server 8000` then visit
+   `http://localhost:8000/fail2ban-report.html`
+2. Use the "📁 Load JSON" button to manually select a `f2b_status.json`
+   file you generated with `fail2ban-report.sh --json`
+3. Ensure `f2b_status.json` exists in the same directory as
+   `fail2ban-report.html` — the dashboard fetches it by that exact
+   relative path (`./f2b_status.json`), so a different filename or
+   folder needs the manual upload button instead
 
 ### Forcing a manual end-to-end test
 
@@ -459,9 +467,33 @@ same Nginx logs this project does, but as a reporting/monitoring layer
 rather than an enforcement one (it never touches your firewall either —
 it only ever generates copy-pasteable remediation commands).
 
-**Note:** This repo now includes `f2b.html`, a lightweight interactive
-dashboard focused on the `ai-watchdog` jail. For comprehensive multi-jail
-analytics, historical trending, and compliance reporting, the companion
+**Note:** This repo now includes `fail2ban-report.html`, a lightweight
+interactive dashboard focused on the `ai-watchdog` jail. It's fed by a
+static JSON snapshot, not a live backend, so getting data into it is a
+two-step, no-server-code process:
+
+1. **Export a snapshot** — run the reporting script in JSON mode wherever
+   `fail2ban-report.sh` lives, pointed at the same directory as the
+   dashboard file:
+
+   ```bash
+   sudo fail2ban-report.sh --json /var/www/html/f2b_status.json
+   ```
+
+2. **Feed the dashboard** — open `fail2ban-report.html` (served over
+   HTTP, e.g. `http://localhost:8000/fail2ban-report.html`) and either let
+   it auto-load `f2b_status.json` from the same folder, click
+   **🔄 Sync Data** to re-fetch after a fresh export, or use
+   **📁 Load JSON** to pick a snapshot file by hand — the last option
+   also works when double-clicking the HTML file locally via `file://`,
+   which blocks the automatic fetch.
+
+For a snapshot that updates itself, add step 1 to cron (see
+[Deployment options](#interactive-dashboard--json-reporting)) so the file
+`fail2ban-report.html` reads is never more than a few minutes stale.
+
+For comprehensive multi-jail analytics, historical trending, and
+compliance reporting beyond this single-jail snapshot view, the companion
 tool remains the recommended choice.
 
 ## License
