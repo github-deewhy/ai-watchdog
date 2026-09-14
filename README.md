@@ -1,7 +1,7 @@
 # AI-Driven Nginx Security Watchdog for Fail2ban
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-1.2.0-informational.svg)
+![Version](https://img.shields.io/badge/version-1.3.0-informational.svg)
 
 🌐 **Live demo & landing page:** [wdog.deewhy.ovh](https://wdog.deewhy.ovh)
 
@@ -83,6 +83,14 @@ then calls `fail2ban-client banip` / `unbanip` directly.
   this jail next to every other jail you already run
 - **NEW:** JSON output mode for integration with external dashboards and monitoring tools
 - **NEW:** Interactive HTML dashboard with real-time sync capabilities
+- **NEW:** Admin IPs are read from an `ADMIN_IPS` env var, not hardcoded —
+  set them once in `ai-watchdog.env` instead of editing `watchdog.py`
+- **NEW:** Error-based triggering now requires both a minimum error *count*
+  and a minimum error *rate* (not raw count alone), so a handful of
+  ordinary 404s from real visitors won't get an IP sent to the AI
+- **NEW:** A code-level guardrail withholds bans on IPs flagged by error
+  volume alone (no exploit/scanner signature match) unless explicitly
+  opted into via `AI_WATCHDOG_ALLOW_ERROR_ONLY_BAN`
 - systemd timer + logrotate units included, ready to drop in
 
 ## Requirements
@@ -117,7 +125,7 @@ then calls `fail2ban-client banip` / `unbanip` directly.
 ### 1. Application files
 
 ```bash
-sudo mkdir -p /opt/ai-watchdog /var/lib/ai-watchdog /etc/ai-watchdog
+sudo mkdir -p /opt/ai-watchdog /var/lib/ai-watchdog
 sudo cp watchdog.py /opt/ai-watchdog/
 sudo chmod +x /opt/ai-watchdog/watchdog.py
 ```
@@ -136,9 +144,9 @@ sudo /opt/ai-watchdog/venv/bin/pip install openai
 ### 3. API key
 
 ```bash
-sudo cp ai-watchdog.env.example /etc/ai-watchdog/ai-watchdog.env
-sudo chmod 600 /etc/ai-watchdog/ai-watchdog.env
-sudo nano /etc/ai-watchdog/ai-watchdog.env   # paste your real API key
+sudo cp ai-watchdog.env.example /opt/ai-watchdog/ai-watchdog.env
+sudo chmod 600 /opt/ai-watchdog/ai-watchdog.env
+sudo nano /opt/ai-watchdog/ai-watchdog.env   # paste your real API key and ADMIN_IPS
 ```
 
 ### 4. fail2ban jail
@@ -248,23 +256,46 @@ dashboard fetches `f2b_status.json` from the same directory and provides:
 
 ### 9. Before going live
 
-- `watchdog.py` → `OWN_IPS`: replace `YOUR_ADMIN_IP_HERE` with this
-  server's real admin IP(s), so you never self-ban.
-- `jail.local` → `ignoreip`: same reason, on the fail2ban side.
+- `ai-watchdog.env` → `ADMIN_IPS`: set this to your real admin/operator
+  IP(s) (comma or whitespace separated), so `watchdog.py` never self-bans.
+  **This is the setting that actually matters** — `watchdog.py` bans by
+  calling `fail2ban-client set ai-watchdog banip <ip>` directly, which
+  does **not** consult the jail's `ignoreip`, so leaving `ADMIN_IPS` unset
+  will not be caught by `ignoreip` alone. If `ADMIN_IPS` is unset, only
+  `127.0.0.1` is protected and a warning is logged on every run.
+- `jail.local` → `ignoreip`: set the same IP(s) here too. This protects
+  you from any *other* filter-driven jail that might also see your
+  traffic — it's a separate, complementary layer, not a substitute for
+  `ADMIN_IPS`.
 - If your Nginx logs live somewhere other than `/var/log/nginx/`, update
   `NGINX_ACCESS_LOG` / `NGINX_ERROR_LOG` at the top of `watchdog.py`.
+- Review the detection thresholds in `ai-watchdog.env` (see
+  [Configuration reference](#configuration-reference)) — the defaults are
+  tuned to avoid flagging ordinary visitors/QA browsing, but you may want
+  to tighten or loosen them for your traffic volume.
 
 ## Configuration reference
 
 | Setting | File | Default | Notes |
 | --- | --- | --- | --- |
 | `NVIDIA_BASE_URL` / `NVIDIA_MODEL` | `watchdog.py` | NVIDIA NIM, `nvidia/nemotron-3-nano-30b-a3b` | Point at any OpenAI-compatible endpoint |
-| `OWN_IPS` | `watchdog.py` | `{"127.0.0.1"}` | Admin/operator IPs excluded from banning |
-| `MIN_EVENTS_FOR_AI` | `watchdog.py` | `3` | Minimum suspicious hits or HTTP errors before a candidate IP is sent to the AI |
-| `MAX_REQUESTS_PER_MINUTE` | `watchdog.py` | `20` | Hard cap on outbound AI calls per minute |
+| `ADMIN_IPS` | `ai-watchdog.env` | unset (only `127.0.0.1` protected) | Comma/whitespace-separated admin IPs excluded from banning. **Set this before going live** — see [Before going live](#9-before-going-live) |
+| `AI_WATCHDOG_MIN_SUSPICIOUS_EVENTS` | `ai-watchdog.env` | `3` | Minimum exploit/scanner-pattern hits before a candidate IP is sent to the AI |
+| `AI_WATCHDOG_MIN_ERROR_COUNT` | `ai-watchdog.env` | `15` | Minimum raw HTTP error count before an IP can be flagged on error grounds alone |
+| `AI_WATCHDOG_MIN_ERROR_RATE` | `ai-watchdog.env` | `0.6` | Minimum error-rate (errors / total requests) also required to flag on error grounds alone |
+| `AI_WATCHDOG_MIN_TOTAL_REQUESTS` | `ai-watchdog.env` | `10` | Minimum total requests before the error-rate check applies (avoids acting on tiny samples) |
+| `AI_WATCHDOG_ALLOW_ERROR_ONLY_BAN` | `ai-watchdog.env` | `false` | If `false`, an IP flagged on error grounds alone (no suspicious-pattern match) is never banned even if the AI says `BAN` |
+| `AI_WATCHDOG_MAX_RPM` | `ai-watchdog.env` | `20` | Hard cap on outbound AI calls per minute |
 | `MAX_RETRIES` | `watchdog.py` | `4` | Retry attempts on 429/connection errors, exponential backoff |
 | Timer cadence | `ai-watchdog.timer` | every 5 minutes | `OnCalendar=*:0/5` |
 | `bantime` | `jail.local` | `86400` (24h) | How long an IP stays banned |
+
+**Why the error-rate check needs two conditions, not one:** a raw error
+*count* alone can't tell "20 errors out of 20 requests" (100% error rate —
+suspicious) apart from "20 errors out of 2,000 requests" (1% error rate —
+normal background noise on a busy site). Requiring both a minimum count
+*and* a minimum rate, over a minimum sample size, avoids both failure
+modes.
 
 ## Rate limiting design
 
@@ -415,13 +446,18 @@ sudo fail2ban-report.sh --json                 # generate JSON for dashboard
 
 ## Security notes
 
-- `/etc/ai-watchdog/ai-watchdog.env` must stay `chmod 600`, root-owned —
+- `/opt/ai-watchdog/ai-watchdog.env` must stay `chmod 600`, root-owned —
   it holds your API key in plaintext.
 - `ai-watchdog.service` runs with `NoNewPrivileges`, `ProtectSystem=strict`,
   and `ProtectHome=true`, with write access limited to `/var/lib/ai-watchdog`
   and `/var/log`.
-- Always keep your own admin IP(s) in both `OWN_IPS` (in `watchdog.py`) and
-  `ignoreip` (in `jail.local`) to avoid self-lockout.
+- Always keep your own admin IP(s) in both `ADMIN_IPS` (in
+  `ai-watchdog.env`) and `ignoreip` (in `jail.local`) to avoid self-lockout.
+  These are two independent safety nets, not duplicates of each other:
+  `ignoreip` only applies to fail2ban's own filter-driven jails, while
+  `watchdog.py` bans via a direct `fail2ban-client banip` call that does
+  **not** consult `ignoreip` at all — `ADMIN_IPS` is the only thing that
+  protects you from that path.
 - This tool only ever calls `fail2ban-client banip`/`unbanip`; it never
   edits `nftables` rules, `iptables`, or any config file on your host
   directly. Firewall enforcement stays entirely inside `fail2ban`, which

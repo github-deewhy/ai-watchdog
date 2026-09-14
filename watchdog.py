@@ -23,8 +23,42 @@ JAIL = "ai-watchdog"
 STATE_FILE = "/var/lib/ai-watchdog/state.json"
 LOG_FILE = "/var/log/ai-watchdog.log"
 
-# Define administrator / operator IPs to protect from self-banning
-OWN_IPS = {"127.0.0.1", "YOUR_ADMIN_IP_HERE"}
+
+def _parse_ip_list(raw):
+    """Split a comma/whitespace-separated env value into a clean set of IPs."""
+    if not raw:
+        return set()
+    return {ip.strip() for ip in re.split(r"[,\s]+", raw) if ip.strip()}
+
+
+def _parse_bool(raw, default=False):
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_float(raw, default):
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_int(raw, default):
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+# Administrator / operator IPs, protected from self-banning. Always includes
+# localhost. Additional IPs come from the ADMIN_IPS env var (comma or
+# whitespace separated), e.g.:
+#   ADMIN_IPS=203.0.113.10,203.0.113.11
+# Keep this in sync with `ignoreip` in jail.local — that setting protects
+# you from fail2ban's own filter, this one protects you from watchdog.py's
+# *direct* fail2ban-client banip calls, which do not consult jail ignoreip.
+OWN_IPS = {"127.0.0.1"} | _parse_ip_list(os.environ.get("ADMIN_IPS"))
 
 EXCLUDED_USER_AGENTS = [
     "CensysInspect", "Palo Alto Networks", "ClaudeBot", "OAI-SearchBot",
@@ -48,13 +82,38 @@ SUSPICIOUS_PATTERNS = [
 ]
 
 HTTP_ERROR_STATUSES = {"400", "401", "403", "404", "405", "499", "500", "502", "503"}
-MIN_EVENTS_FOR_AI = 3
+
+# ---------------- Detection thresholds ----------------
+# All overridable via env so tuning doesn't require touching code.
+#
+# Suspicious-pattern hits are a strong, low-noise signal (wp-login, .env,
+# SQLi payloads etc. don't show up from normal browsing), so this stays low.
+MIN_SUSPICIOUS_EVENTS_FOR_AI = _parse_int(os.environ.get("AI_WATCHDOG_MIN_SUSPICIOUS_EVENTS"), 3)
+
+# Plain HTTP errors (404/403/etc.) are NOT a strong signal on their own —
+# a few clicks around a freshly-deployed site, a missing favicon, or a
+# typo'd URL will produce these too. To avoid flagging ordinary visitors,
+# an IP must clear *both* a minimum error count AND a minimum error rate
+# (errors / total requests) before it's sent to the AI on error grounds
+# alone. Raise MIN_ERROR_EVENTS_FOR_AI and/or MIN_ERROR_RATE_FOR_AI if you
+# are still seeing false positives from real traffic.
+MIN_ERROR_EVENTS_FOR_AI = _parse_int(os.environ.get("AI_WATCHDOG_MIN_ERROR_COUNT"), 15)
+MIN_ERROR_RATE_FOR_AI = _parse_float(os.environ.get("AI_WATCHDOG_MIN_ERROR_RATE"), 0.6)
+MIN_TOTAL_REQUESTS_FOR_ERROR_RATE = _parse_int(os.environ.get("AI_WATCHDOG_MIN_TOTAL_REQUESTS"), 10)
+
+# Code-level guardrail: an IP that only tripped the *error* threshold (no
+# suspicious-pattern hits at all) will not be banned even if the AI says
+# BAN, unless this is explicitly enabled. This protects against a small
+# model over-indexing on "lots of 404s" as an attack signature when it's
+# often just real, imperfect traffic. Suspicious-pattern-triggered
+# candidates are never affected by this flag.
+ALLOW_ERROR_ONLY_BAN = _parse_bool(os.environ.get("AI_WATCHDOG_ALLOW_ERROR_ONLY_BAN"), False)
 
 # ---------------- Rate Limiting ----------------
 # Hard cap imposed by the NIM free tier is 40 RPM. We run at a 50% safety
 # margin (20 RPM) so a burst from another process sharing this key, or a
 # noisy scan sweep, never trips the provider's limiter.
-MAX_REQUESTS_PER_MINUTE = 20
+MAX_REQUESTS_PER_MINUTE = _parse_int(os.environ.get("AI_WATCHDOG_MAX_RPM"), 20)
 _WINDOW_SECONDS = 60.0
 MAX_RETRIES = 4
 BACKOFF_BASE_SECONDS = 2.0
@@ -105,6 +164,13 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger("ai-watchdog")
+
+if not OWN_IPS - {"127.0.0.1"}:
+    logger.warning(
+        "ADMIN_IPS is not set (or empty) — only 127.0.0.1 is protected from "
+        "self-banning. Set ADMIN_IPS in the environment to your real IP(s) "
+        "before relying on this in production."
+    )
 
 # ---------------- NVIDIA Client ----------------
 client = None
@@ -163,29 +229,52 @@ def extract_status_code(line):
     return None
 
 
-def query_ai(ip, events, total_requests, error_count):
+def query_ai(ip, events, total_requests, error_count, has_suspicious_hits):
     if client is None:
         logger.error(f"Skipping AI evaluation for {ip}: no API key configured")
         return None
 
+    error_rate = (error_count / total_requests) if total_requests else 0.0
     context = "\n".join(events[-10:])
+
+    signal_note = (
+        "This IP matched known exploit/scanner signatures (path traversal, "
+        "credential/config probing, injection payloads, etc.) in its request "
+        "paths."
+        if has_suspicious_hits else
+        "This IP was flagged purely on HTTP error volume/rate — no exploit "
+        "or scanner signature matched any of its request paths."
+    )
+
     prompt = f"""Analyze the following Nginx security log context for IP address {ip}:
 
 Traffic Summary:
 - Total Logged Events: {total_requests}
 - HTTP Error Count (4xx/5xx): {error_count}
+- HTTP Error Rate: {error_rate:.0%}
+- Flag basis: {signal_note}
 
 Recent Log Entries:
 {context}
 
-System Directive:
-Identify if this IP is performing automated scanning, path traversal, exploit injection (SQLi/XSS/RCE), sensitive file probing, or credential attack.
+Important context: occasional HTTP errors (missing favicon/assets, a typo'd
+URL, a page still under construction, normal manual QA browsing) are NOT
+malicious on their own, even in a small sample. Only classify BAN when the
+log entries show a clear attack signature: automated scanning across many
+paths, path traversal, exploit injection (SQLi/XSS/RCE/SSRF), sensitive
+file/credential probing, or a credential-stuffing pattern. If the evidence
+is ambiguous or looks like it could plausibly be a real visitor or a normal
+crawler, prefer IGNORE — a missed detection is cheap (it will be
+re-evaluated next cycle if the behavior continues), but banning a real
+visitor is not.
 
 Respond strictly with BAN, IGNORE, or UNBAN."""
 
     system_prompt = (
         "You are an automated Web Application Firewall (WAF) analyzer. "
-        "Your role is to classify traffic into BAN, IGNORE, or UNBAN with absolute precision."
+        "Your role is to classify traffic into BAN, IGNORE, or UNBAN with "
+        "high precision, favoring IGNORE whenever the evidence is ambiguous "
+        "rather than assuming malicious intent from limited data."
     )
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -211,7 +300,11 @@ Respond strictly with BAN, IGNORE, or UNBAN."""
             match = re.search(r'\b(BAN|IGNORE|UNBAN)\b', raw_resp)
             decision = match.group(1) if match else None
 
-            logger.info(f"AI evaluated {ip} (Errors={error_count}/{total_requests}): decision={decision} (raw='{raw_resp}')")
+            logger.info(
+                f"AI evaluated {ip} (Errors={error_count}/{total_requests}, "
+                f"rate={error_rate:.0%}, suspicious={has_suspicious_hits}): "
+                f"decision={decision} (raw='{raw_resp}')"
+            )
             return decision
 
         except APIStatusError as e:
@@ -324,16 +417,35 @@ def main():
         if is_suspicious_line(line):
             suspicious_events_by_ip[ip].append(line)
 
+    # An IP can be flagged two ways:
+    #   1. Suspicious-pattern hits (strong signal, low threshold)
+    #   2. HTTP error volume AND rate both crossing their thresholds
+    #      (weak signal on its own, so both conditions are required)
     candidate_ips = set()
+    error_only_ips = set()
+
     for ip, events in suspicious_events_by_ip.items():
-        if len(events) >= MIN_EVENTS_FOR_AI:
+        if len(events) >= MIN_SUSPICIOUS_EVENTS_FOR_AI:
             candidate_ips.add(ip)
 
     for ip, err_count in error_counts_by_ip.items():
-        if err_count >= MIN_EVENTS_FOR_AI:
+        if ip in candidate_ips:
+            continue  # already flagged via suspicious patterns
+        total = len(all_events_by_ip[ip])
+        error_rate = (err_count / total) if total else 0.0
+        if (
+            err_count >= MIN_ERROR_EVENTS_FOR_AI
+            and total >= MIN_TOTAL_REQUESTS_FOR_ERROR_RATE
+            and error_rate >= MIN_ERROR_RATE_FOR_AI
+        ):
             candidate_ips.add(ip)
+            error_only_ips.add(ip)
 
-    logger.info(f"Identified {len(candidate_ips)} candidate IPs for AI evaluation")
+    logger.info(
+        f"Identified {len(candidate_ips)} candidate IPs for AI evaluation "
+        f"({len(candidate_ips) - len(error_only_ips)} via suspicious patterns, "
+        f"{len(error_only_ips)} via error rate)"
+    )
 
     if len(candidate_ips) > MAX_REQUESTS_PER_MINUTE:
         eta_seconds = (len(candidate_ips) / MAX_REQUESTS_PER_MINUTE) * 60
@@ -343,12 +455,21 @@ def main():
         )
 
     for ip in candidate_ips:
+        has_suspicious_hits = ip not in error_only_ips
         events_to_show = suspicious_events_by_ip[ip] if suspicious_events_by_ip[ip] else all_events_by_ip[ip]
         total_reqs = len(all_events_by_ip[ip])
         err_count = error_counts_by_ip[ip]
 
-        decision = query_ai(ip, events_to_show, total_reqs, err_count)
+        decision = query_ai(ip, events_to_show, total_reqs, err_count, has_suspicious_hits)
+
         if decision == "BAN":
+            if ip in error_only_ips and not ALLOW_ERROR_ONLY_BAN:
+                logger.info(
+                    f"AI said BAN for {ip} but it was flagged on error rate "
+                    f"alone (no suspicious pattern match); withholding ban "
+                    f"per ALLOW_ERROR_ONLY_BAN=false guardrail."
+                )
+                continue
             ban_ip(ip, f"AI decision triggered (Total Reqs: {total_reqs}, Errors: {err_count})")
         elif decision == "UNBAN":
             unban_ip(ip)

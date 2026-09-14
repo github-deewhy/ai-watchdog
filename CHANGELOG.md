@@ -6,6 +6,72 @@ This project follows [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PA
 - **MINOR** — backward-compatible feature additions (new detection signals, new utilities)
 - **PATCH** — backward-compatible fixes (bug fixes, security patches, dependency bumps)
 
+## [1.3.0] - 2026-09-13
+
+### Fixed
+
+- **Admin self-banning:** `watchdog.py` previously shipped with a literal
+  `YOUR_ADMIN_IP_HERE` placeholder in `OWN_IPS` that was easy to leave
+  unreplaced. Because `watchdog.py` bans by calling `fail2ban-client set
+  ai-watchdog banip <ip>` directly, the jail's `ignoreip` setting does
+  **not** protect against this — `ignoreip` only applies to fail2ban's own
+  filter-driven jails, not to manual/API-issued ban commands. An operator
+  could be correctly whitelisted in `jail.local` and still get banned by
+  the watchdog itself. Admin IPs are now supplied via a required `ADMIN_IPS`
+  env var instead of a hardcoded placeholder, and a warning is logged on
+  every run if it's left unset.
+- **Env file path inconsistency:** `ai-watchdog.service`'s `EnvironmentFile`
+  and the installation docs previously disagreed with each other in some
+  deployments about whether the env file lives under `/etc/ai-watchdog/`
+  or `/opt/ai-watchdog/`. Standardized on `/opt/ai-watchdog/ai-watchdog.env`
+  (alongside `watchdog.py` itself) everywhere — the service unit, the env
+  example header comment, and the README installation steps.
+
+### Added
+
+- `ADMIN_IPS` env var (`ai-watchdog.env`): comma/whitespace-separated list
+  of admin/operator IPs, merged with `127.0.0.1`, exempted from banning.
+- Adjustable detection thresholds, all overridable via env vars so tuning
+  no longer requires editing `watchdog.py`:
+  - `AI_WATCHDOG_MIN_SUSPICIOUS_EVENTS` (default `3`)
+  - `AI_WATCHDOG_MIN_ERROR_COUNT` (default `15`)
+  - `AI_WATCHDOG_MIN_ERROR_RATE` (default `0.6`)
+  - `AI_WATCHDOG_MIN_TOTAL_REQUESTS` (default `10`)
+  - `AI_WATCHDOG_ALLOW_ERROR_ONLY_BAN` (default `false`)
+  - `AI_WATCHDOG_MAX_RPM` (default `20`)
+- Code-level guardrail: an IP flagged on HTTP error volume alone (no
+  suspicious exploit/scanner pattern match) is never banned, even if the
+  AI returns `BAN`, unless `AI_WATCHDOG_ALLOW_ERROR_ONLY_BAN=true`.
+
+### Changed
+
+- **Less aggressive error-based triggering:** an IP is now only sent to the
+  AI on error grounds if it clears both a minimum error *count* and a
+  minimum error *rate* (errors / total requests) over a minimum sample
+  size — previously a raw count of 3 errors was enough, which could catch
+  ordinary visitors browsing a site with a few broken links, missing
+  assets, or in-progress pages.
+- **Improved AI prompt:** the classification prompt now includes the
+  computed error rate, explicitly names common benign causes of HTTP
+  errors, and instructs the model to prefer `IGNORE` when evidence is
+  ambiguous, reducing false-positive `BAN` decisions from the small
+  classification model.
+- Log lines for AI decisions now include the error rate and whether the
+  candidate was flagged via suspicious patterns or error rate, to make
+  after-the-fact review easier.
+
+### Migration notes
+
+- **Action required:** set `ADMIN_IPS` in `/opt/ai-watchdog/ai-watchdog.env`
+  to your real admin/operator IP(s) before deploying this version. The old
+  `OWN_IPS` hardcoded set in `watchdog.py` is no longer read from code —
+  only `127.0.0.1` plus whatever `ADMIN_IPS` supplies is protected.
+- If you had previously edited `MIN_EVENTS_FOR_AI` directly in
+  `watchdog.py`, that constant has been split into the suspicious/error
+  thresholds above — replicate your old value via
+  `AI_WATCHDOG_MIN_SUSPICIOUS_EVENTS` and review the new error-rate
+  defaults, which are intentionally stricter than the old raw count.
+
 ## [1.2.0] - 2026-09-12
 
 ### Added
